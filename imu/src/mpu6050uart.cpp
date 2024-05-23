@@ -37,7 +37,7 @@ public:
         }
     };
 
-    void open(int baud, const std::string &serial_port = "/dev/ttyUSB0") {
+    void open(int baud, const std::string &serial_port) {
         if (mRunning) {
             fprintf(stderr, "Uart has been open: Handler: %d\n", mMPUHandle);
             return;
@@ -296,18 +296,19 @@ private:
         msg.orientation.y = f_cos * s_sin * t_cos + f_sin * s_cos * t_sin;
         msg.orientation.z = f_cos * s_cos * t_sin - f_sin * s_sin * t_cos;
 
-        // RCLCPP_INFO(this->get_logger(), "MPU6050: \n\tSequence: %llu"
-        //             "\n\tAcceleration(m/s^2): %6.3f %6.3f %6.3f; "
-        //             "\n\tGyroscope(rad/s): %6.3f %6.3f %6.3f; "
-        //             "\n\tEuler Angle(degree): %6.3f %6.3f %6.3f",
-        //             mSeq,
-        //             full_data.linear_acceleration.x,
-        //             full_data.linear_acceleration.y,
-        //             full_data.linear_acceleration.z,
-        //             full_data.angular_velocity.x,
-        //             full_data.angular_velocity.y,
-        //             full_data.angular_velocity.z,
-        //             mRawImuData[6], mRawImuData[7], mRawImuData[8]);
+        RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 1000,
+                             "MPU6050: \n\tSequence: %llu"
+                             "\n\tAcceleration(m/s^2): %6.3f %6.3f %6.3f; "
+                             "\n\tGyroscope(rad/s): %6.3f %6.3f %6.3f; "
+                             "\n\tEuler Angle(degree): %6.3f %6.3f %6.3f",
+                             mSeq,
+                             msg.linear_acceleration.x,
+                             msg.linear_acceleration.y,
+                             msg.linear_acceleration.z,
+                             msg.angular_velocity.x,
+                             msg.angular_velocity.y,
+                             msg.angular_velocity.z,
+                             mRawImuData[6], mRawImuData[7], mRawImuData[8]);
         mPublisher->publish(msg);
         // usleep(1000);
         mSeq++;
