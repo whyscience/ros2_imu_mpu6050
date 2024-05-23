@@ -4,47 +4,23 @@
  * Date: 2022-07-14.
  * License: Apache License 2.0.
  */
-#include <stdio.h>
-#include <stdlib.h>
+#include <cstdio>
+#include <cstdlib>
 #include <fcntl.h>
 #include <unistd.h>
-#include <assert.h>
+#include <cassert>
 #include <termios.h>
-#include <string.h>
+#include <cstring>
 #include <sys/time.h>
-#include <time.h>
+#include <ctime>
 #include <array>
 #include <memory>
 #include <sys/types.h>
-#include <errno.h>
 
 #include "sensor_msgs/msg/imu.hpp"
 #include "rclcpp/rclcpp.hpp"
 
-// 115200 for JY61 ,9600 for others
-// 115200 meaning 100Hz, 9600 meaning 20Hz.
-#define BAUD 115200
-#define Gravity 9.801 //in China Mainland most area can use this value.
-#define DEGREE_TO_RAD 0.0174532925199 //Pi/180
-#define DEGREE_TO_RAD_HALF 0.00872664626 //Pi/360
-#define IMU_DEVICE_LOCATION "/dev/ttyTHS1" //for jetson user leave here as it is.
-#define MPU_6050_TOPIC "mpu6050" //change mpu6050 topic name as your wish.
-#define MPU_NODE_NAME "imu_6050_node" //change as you wish.
-#define MPU_QUEUE_SIZE 10
 
-template<typename T>
-using SharedRef = std::shared_ptr<T>;
-
-///@note here is cpp perfect forwarding.
-template<typename T, typename... Args>
-constexpr SharedRef<T> createSharedRef(Args &&...args) {
-    return std::make_shared<T>(std::forward<Args>(args)...);
-}
-
-using ImgPubType = rclcpp::Publisher<sensor_msgs::msg::Imu>::SharedPtr;
-using TimerPtrType = rclcpp::TimerBase::SharedPtr;
-using ImuDataPatch = std::array<float, 9>;
-using MilliSeconds = std::chrono::duration<double, std::milli>;
 using std::cos;
 using std::sin;
 
@@ -61,12 +37,12 @@ public:
         }
     };
 
-    void open(int baud = BAUD) {
-        if (mRunning){
-            fprintf(stderr, "Uart has been open: Handler: %d\n",mMPUHandle);
+    void open(int baud, const std::string &serial_port = "/dev/ttyUSB0") {
+        if (mRunning) {
+            fprintf(stderr, "Uart has been open: Handler: %d\n", mMPUHandle);
             return;
         }
-        mMPUHandle = uart_open(mDeviceLoc);
+        mMPUHandle = uart_open(serial_port.c_str());
         if (mMPUHandle == -1) {
             fprintf(stderr, "Uart open error\n");
             exit(EXIT_FAILURE);
@@ -87,7 +63,7 @@ public:
         }
     };
 
-    void getData(ImuDataPatch &data, bool withAngle = true) {
+    void getData(std::array<float, 9> &data, bool withAngle = true) {
         int ret = recv_data(mBuff, 44);
         if (ret == -1) {
             fprintf(stderr, "uart read failed!\n");
@@ -237,7 +213,7 @@ private:
             return;
 
         if ((chrBuf[0] != 0x55) || ((chrBuf[1] & 0x50) != 0x50)) {
-            printf("Error:%x %x\r\n", chrBuf[0], chrBuf[1]);
+            //printf("Error:%x %x\r\n", chrBuf[0], chrBuf[1]);
             memcpy(&chrBuf[0], &chrBuf[1], 10);
             chrCnt--;
             return;
@@ -249,56 +225,62 @@ private:
                 for (i = 0; i < 3; i++)
                     mAcceleration[i] = (float) sData[i] / 32768.0 * 16.0;
                 time(&now);
-//                printf("\r\nT:%s a:%6.3f %6.3f %6.3f ",
-//                       asctime(localtime(&now)), mAcceleration[0], mAcceleration[1], mAcceleration[2]);
+            //printf("\r\nT:%s a:%6.3f %6.3f %6.3f ",
+            //  asctime(localtime(&now)), mAcceleration[0], mAcceleration[1], mAcceleration[2]);
                 break;
             case 0x52:
                 for (i = 0; i < 3; i++)
                     mGyroscope[i] = (float) sData[i] / 32768.0 * 2000.0;
-//                printf("w:%7.3f %7.3f %7.3f ", mGyroscope[0], mGyroscope[1], mGyroscope[2]);
+            // printf("w:%7.3f %7.3f %7.3f ", mGyroscope[0], mGyroscope[1], mGyroscope[2]);
                 break;
             case 0x53:
                 for (i = 0; i < 3; i++)
                     mAngle[i] = (float) sData[i] / 32768.0 * 180.0;
-//                printf("A:%7.3f %7.3f %7.3f ", mAngle[0], mAngle[1], mAngle[2]);
+            // printf("A:%7.3f %7.3f %7.3f ", mAngle[0], mAngle[1], mAngle[2]);
                 break;
         }
         chrCnt = 0;
     }
 
 private:
-    float mAcceleration[3];
-    float mGyroscope[3];
-    float mAngle[3];
-    char mBuff[1024];
-    int mMPUHandle;
+    float mAcceleration[3]{};
+    float mGyroscope[3]{};
+    float mAngle[3]{};
+    char mBuff[1024]{};
+    int mMPUHandle{};
     bool mRunning = false;
-    const char *mDeviceLoc = IMU_DEVICE_LOCATION;
 };
 
 class MPU6050Node : public rclcpp::Node {
 public:
-    MPU6050Node() : Node(MPU_NODE_NAME) {
-        mIMUDevice = createSharedRef<MPU6050HW>();
-        mIMUDevice->open();
+    MPU6050Node() : Node("mpu6050_node") {
+        mIMUDevice = std::make_shared<MPU6050HW>();
+        // 115200 for JY61 ,9600 for others
+        // 115200 meaning 100Hz, 9600 meaning 20Hz.
+        this->declare_parameter<int>("baudrate", 115200);
+        this->declare_parameter("serial_port", "/dev/ttyUSB0");
+        int baudrate = this->get_parameter("baudrate").as_int();
+        std::string serial_port = this->get_parameter("serial_port").as_string();
+
+        mIMUDevice->open(baudrate, serial_port);
         // create publisher and setup timer callback. here 10 meaning queue size.
-        mPublisher = this->create_publisher<sensor_msgs::msg::Imu>(MPU_6050_TOPIC, MPU_QUEUE_SIZE);
+        mPublisher = this->create_publisher<sensor_msgs::msg::Imu>("/imu/data", 10);
         mSeq = 0;
-        MilliSeconds dur(mTimerDur);
+        std::chrono::duration<double, std::milli> dur(mTimerDur);
         mTimer = this->create_wall_timer(dur, std::bind(&MPU6050Node::timer_callback, this));
     };
 
 private:
     void timer_callback() {
-
         mIMUDevice->getData(mRawImuData);
         auto full_data = sensor_msgs::msg::Imu();
         // fill in data.
+        full_data.header.frame_id = "imu_link";
         full_data.header.stamp = this->get_clock()->now();
         full_data.linear_acceleration.x = mRawImuData[0] * mGravity;
         full_data.linear_acceleration.y = mRawImuData[1] * mGravity;
         full_data.linear_acceleration.z = mRawImuData[2] * mGravity;
-        full_data.angular_velocity.x = mRawImuData[3] * DegreeToRad;
+        full_data.angular_velocity.x = mRawImuData[3] * M_PI / 180;
         full_data.angular_velocity.y = mRawImuData[4] * DegreeToRad;
         full_data.angular_velocity.z = mRawImuData[5] * DegreeToRad;
         float f_cos = cos(mRawImuData[6] * DegreeToRadHalf);
@@ -312,33 +294,33 @@ private:
         full_data.orientation.y = f_cos * s_sin * t_cos + f_sin * s_cos * t_sin;
         full_data.orientation.z = f_cos * s_cos * t_sin - f_sin * s_sin * t_cos;
 
-        RCLCPP_INFO(this->get_logger(), "MPU6050: \n\tSequence: %llu"
-                                        "\n\tAcceleration(m/s^2): %6.3f %6.3f %6.3f; "
-                                        "\n\tGyroscope(rad/s): %6.3f %6.3f %6.3f; "
-                                        "\n\tEuler Angle(degree): %6.3f %6.3f %6.3f",
-                    mSeq,
-                    full_data.linear_acceleration.x,
-                    full_data.linear_acceleration.y,
-                    full_data.linear_acceleration.z,
-                    full_data.angular_velocity.x,
-                    full_data.angular_velocity.y,
-                    full_data.angular_velocity.z,
-                    mRawImuData[6], mRawImuData[7], mRawImuData[8]);
+        // RCLCPP_INFO(this->get_logger(), "MPU6050: \n\tSequence: %llu"
+        //             "\n\tAcceleration(m/s^2): %6.3f %6.3f %6.3f; "
+        //             "\n\tGyroscope(rad/s): %6.3f %6.3f %6.3f; "
+        //             "\n\tEuler Angle(degree): %6.3f %6.3f %6.3f",
+        //             mSeq,
+        //             full_data.linear_acceleration.x,
+        //             full_data.linear_acceleration.y,
+        //             full_data.linear_acceleration.z,
+        //             full_data.angular_velocity.x,
+        //             full_data.angular_velocity.y,
+        //             full_data.angular_velocity.z,
+        //             mRawImuData[6], mRawImuData[7], mRawImuData[8]);
         mPublisher->publish(full_data);
         // usleep(1000);
         mSeq++;
     }
 
 private:
-    SharedRef<MPU6050HW> mIMUDevice;
-    ImgPubType mPublisher;
-    TimerPtrType mTimer;
-    ImuDataPatch mRawImuData;
+    std::shared_ptr<MPU6050HW> mIMUDevice;
+    rclcpp::Publisher<sensor_msgs::msg::Imu>::SharedPtr mPublisher;
+    rclcpp::TimerBase::SharedPtr mTimer;
+    std::array<float, 9> mRawImuData{};
 
-    const int mTimerDur = BAUD > 9700 ? 10 : 50;
-    const double mGravity = Gravity;
-    const double DegreeToRad = DEGREE_TO_RAD;
-    const double DegreeToRadHalf = DEGREE_TO_RAD_HALF;
+    const int mTimerDur = 50;
+    const double mGravity = 9.801;
+    const double DegreeToRad = M_PI / 180;
+    const double DegreeToRadHalf = M_PI / 360;
     unsigned long long mSeq = 0;
 };
 
