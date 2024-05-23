@@ -63,7 +63,7 @@ public:
         }
     };
 
-    void getData(std::array<float, 9> &data, bool withAngle = true) {
+    void getData(std::array<double, 9> &data, bool withAngle = true) {
         int ret = recv_data(mBuff, 44);
         if (ret == -1) {
             fprintf(stderr, "uart read failed!\n");
@@ -223,19 +223,19 @@ private:
         switch (chrBuf[1]) {
             case 0x51:
                 for (i = 0; i < 3; i++)
-                    mAcceleration[i] = (float) sData[i] / 32768.0 * 16.0;
+                    mAcceleration[i] = (double) sData[i] / 32768.0 * 16.0;
                 time(&now);
             //printf("\r\nT:%s a:%6.3f %6.3f %6.3f ",
             //  asctime(localtime(&now)), mAcceleration[0], mAcceleration[1], mAcceleration[2]);
                 break;
             case 0x52:
                 for (i = 0; i < 3; i++)
-                    mGyroscope[i] = (float) sData[i] / 32768.0 * 2000.0;
+                    mGyroscope[i] = (double) sData[i] / 32768.0 * 2000.0;
             // printf("w:%7.3f %7.3f %7.3f ", mGyroscope[0], mGyroscope[1], mGyroscope[2]);
                 break;
             case 0x53:
                 for (i = 0; i < 3; i++)
-                    mAngle[i] = (float) sData[i] / 32768.0 * 180.0;
+                    mAngle[i] = (double) sData[i] / 32768.0 * 180.0;
             // printf("A:%7.3f %7.3f %7.3f ", mAngle[0], mAngle[1], mAngle[2]);
                 break;
         }
@@ -243,9 +243,9 @@ private:
     }
 
 private:
-    float mAcceleration[3]{};
-    float mGyroscope[3]{};
-    float mAngle[3]{};
+    double mAcceleration[3]{};
+    double mGyroscope[3]{};
+    double mAngle[3]{};
     char mBuff[1024]{};
     int mMPUHandle{};
     bool mRunning = false;
@@ -259,40 +259,42 @@ public:
         // 115200 meaning 100Hz, 9600 meaning 20Hz.
         this->declare_parameter<int>("baudrate", 115200);
         this->declare_parameter("serial_port", "/dev/ttyUSB0");
+        this->declare_parameter("imu_rate", 50);
         int baudrate = this->get_parameter("baudrate").as_int();
         std::string serial_port = this->get_parameter("serial_port").as_string();
+        int imu_rate = this->get_parameter("imu_rate").as_int();
 
         mIMUDevice->open(baudrate, serial_port);
         // create publisher and setup timer callback. here 10 meaning queue size.
         mPublisher = this->create_publisher<sensor_msgs::msg::Imu>("/imu/data", 10);
         mSeq = 0;
-        std::chrono::duration<double, std::milli> dur(mTimerDur);
+        std::chrono::duration<double, std::milli> dur(1000 / imu_rate);
         mTimer = this->create_wall_timer(dur, std::bind(&MPU6050Node::timer_callback, this));
     };
 
 private:
     void timer_callback() {
         mIMUDevice->getData(mRawImuData);
-        auto full_data = sensor_msgs::msg::Imu();
+        auto msg = sensor_msgs::msg::Imu();
         // fill in data.
-        full_data.header.frame_id = "imu_link";
-        full_data.header.stamp = this->get_clock()->now();
-        full_data.linear_acceleration.x = mRawImuData[0] * mGravity;
-        full_data.linear_acceleration.y = mRawImuData[1] * mGravity;
-        full_data.linear_acceleration.z = mRawImuData[2] * mGravity;
-        full_data.angular_velocity.x = mRawImuData[3] * M_PI / 180;
-        full_data.angular_velocity.y = mRawImuData[4] * DegreeToRad;
-        full_data.angular_velocity.z = mRawImuData[5] * DegreeToRad;
-        float f_cos = cos(mRawImuData[6] * DegreeToRadHalf);
-        float f_sin = sin(mRawImuData[6] * DegreeToRadHalf);
-        float s_cos = cos(mRawImuData[7] * DegreeToRadHalf);
-        float s_sin = sin(mRawImuData[7] * DegreeToRadHalf);
-        float t_cos = cos(mRawImuData[8] * DegreeToRadHalf);
-        float t_sin = sin(mRawImuData[8] * DegreeToRadHalf);
-        full_data.orientation.w = f_cos * s_cos * t_cos + f_sin * s_sin * t_sin;
-        full_data.orientation.x = f_sin * s_cos * t_cos - f_cos * s_sin * t_sin;
-        full_data.orientation.y = f_cos * s_sin * t_cos + f_sin * s_cos * t_sin;
-        full_data.orientation.z = f_cos * s_cos * t_sin - f_sin * s_sin * t_cos;
+        msg.header.frame_id = "imu_link";
+        msg.header.stamp = this->get_clock()->now();
+        msg.linear_acceleration.x = mRawImuData[0] * mGravity;
+        msg.linear_acceleration.y = mRawImuData[1] * mGravity;
+        msg.linear_acceleration.z = mRawImuData[2] * mGravity;
+        msg.angular_velocity.x = mRawImuData[3] * M_PI / 180;
+        msg.angular_velocity.y = mRawImuData[4] * DegreeToRad;
+        msg.angular_velocity.z = mRawImuData[5] * DegreeToRad;
+        double f_cos = cos(mRawImuData[6] * DegreeToRadHalf);
+        double f_sin = sin(mRawImuData[6] * DegreeToRadHalf);
+        double s_cos = cos(mRawImuData[7] * DegreeToRadHalf);
+        double s_sin = sin(mRawImuData[7] * DegreeToRadHalf);
+        double t_cos = cos(mRawImuData[8] * DegreeToRadHalf);
+        double t_sin = sin(mRawImuData[8] * DegreeToRadHalf);
+        msg.orientation.w = f_cos * s_cos * t_cos + f_sin * s_sin * t_sin;
+        msg.orientation.x = f_sin * s_cos * t_cos - f_cos * s_sin * t_sin;
+        msg.orientation.y = f_cos * s_sin * t_cos + f_sin * s_cos * t_sin;
+        msg.orientation.z = f_cos * s_cos * t_sin - f_sin * s_sin * t_cos;
 
         // RCLCPP_INFO(this->get_logger(), "MPU6050: \n\tSequence: %llu"
         //             "\n\tAcceleration(m/s^2): %6.3f %6.3f %6.3f; "
@@ -306,7 +308,7 @@ private:
         //             full_data.angular_velocity.y,
         //             full_data.angular_velocity.z,
         //             mRawImuData[6], mRawImuData[7], mRawImuData[8]);
-        mPublisher->publish(full_data);
+        mPublisher->publish(msg);
         // usleep(1000);
         mSeq++;
     }
@@ -315,9 +317,8 @@ private:
     std::shared_ptr<MPU6050HW> mIMUDevice;
     rclcpp::Publisher<sensor_msgs::msg::Imu>::SharedPtr mPublisher;
     rclcpp::TimerBase::SharedPtr mTimer;
-    std::array<float, 9> mRawImuData{};
+    std::array<double, 9> mRawImuData{};
 
-    const int mTimerDur = 50;
     const double mGravity = 9.801;
     const double DegreeToRad = M_PI / 180;
     const double DegreeToRadHalf = M_PI / 360;
